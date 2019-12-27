@@ -1,0 +1,338 @@
+---
+title: "irt_metric_understanding"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(mirt)
+library(MASS)
+source("leah/my_leah_code_rewrite_functions.R")
+dat <- expand.table(LSAT7)
+```
+
+fit models
+
+```{r}
+mod1 <- 
+    mirt(
+        dat, 1, "2PL", constrain = list(c(1, 5, 9, 13, 17)), 
+        SE = TRUE
+    )
+
+mod2 <- mirt(dat, 1, "2PL", SE = TRUE)
+```
+
+calculate probs
+
+```{r}
+quads <- seq(-4, 4, by = 0.25)
+probs_true_mod1 <- model_to_probs(mod1)
+probs_true_mod2 <- model_to_probs(mod2)
+
+model <- mod2
+```
+
+extract parameters and covariance matrices 
+
+```{r}
+pars_true_mod1 <- extract.mirt(mod1, "parvec")
+pars_true_mod2 <- extract.mirt(mod2, "parvec")
+
+pars_vcov_mod1 <- extract.mirt(mod1, "vcov")
+pars_vcov_mod2 <- extract.mirt(mod2, "vcov")
+```
+
+draw some alternative parameters
+
+```{r}
+n_draws <- 1000
+pars_draws_mod1 <- mvrnorm(n = n_draws, mu = pars_true_mod1, Sigma = pars_vcov_mod1)
+pars_draws_mod2 <- mvrnorm(n = n_draws, mu = pars_true_mod2, Sigma = pars_vcov_mod2)
+```
+
+calculate probs with those alternative parameters
+
+```{r}
+probs_draws_mod1_item1 <- 
+    t(apply(pars_draws_mod1, 1, function(p) 1 / (1 + exp(-p[1] * quads - p[2])))) %>% 
+    as_tibble() %>% 
+    set_names(paste0("th", quads))
+probs_draws_mod1_item2 <- 
+    t(apply(pars_draws_mod1, 1, function(p) 1 / (1 + exp(-p[1] * quads - p[3])))) %>% 
+    as_tibble() %>% 
+    set_names(paste0("th", quads))
+probs_draws_mod1_item3 <- 
+    t(apply(pars_draws_mod1, 1, function(p) 1 / (1 + exp(-p[1] * quads - p[4])))) %>% 
+    as_tibble() %>% 
+    set_names(paste0("th", quads))
+probs_draws_mod1_item4 <- 
+    t(apply(pars_draws_mod1, 1, function(p) 1 / (1 + exp(-p[1] * quads - p[5])))) %>% 
+    as_tibble() %>% 
+    set_names(paste0("th", quads))
+probs_draws_mod1_item5 <- 
+    t(apply(pars_draws_mod1, 1, function(p) 1 / (1 + exp(-p[1] * quads - p[6])))) %>% 
+    as_tibble() %>% 
+    set_names(paste0("th", quads))
+
+probs_draws_mod2_item1 <- 
+    t(apply(pars_draws_mod2, 1, function(p) 1 / (1 + exp(-p[1] * quads - p[2])))) %>% 
+    as_tibble() %>% 
+    set_names(paste0("th", quads))
+probs_draws_mod2_item2 <- 
+    t(apply(pars_draws_mod2, 1, function(p) 1 / (1 + exp(-p[3] * quads - p[4])))) %>% 
+    as_tibble() %>% 
+    set_names(paste0("th", quads))
+probs_draws_mod2_item3 <- 
+    t(apply(pars_draws_mod2, 1, function(p) 1 / (1 + exp(-p[5] * quads - p[6])))) %>% 
+    as_tibble() %>% 
+    set_names(paste0("th", quads))
+probs_draws_mod2_item4 <- 
+    t(apply(pars_draws_mod2, 1, function(p) 1 / (1 + exp(-p[7] * quads - p[8])))) %>% 
+    as_tibble() %>% 
+    set_names(paste0("th", quads))
+probs_draws_mod2_item5 <- 
+    t(apply(pars_draws_mod2, 1, function(p) 1 / (1 + exp(-p[9] * quads - p[10])))) %>% 
+    as_tibble() %>% 
+    set_names(paste0("th", quads))
+```
+
+graph the model estimate and then 2.5% and 97.5% probabilites for each model
+
+```{r}
+tibble(quads) %>% 
+    mutate(
+        p1 = 1 / (1 + exp(-pars_true_mod1[1] * quads - pars_true_mod1[4])),
+        mod1_low = probs_draws_mod1_item3 %>% map_dbl(quantile, probs = 0.025),
+        mod1_high = probs_draws_mod1_item3 %>% map_dbl(quantile, probs = 0.975),
+        p2 = 1 / (1 + exp(-pars_true_mod2[5] * quads - pars_true_mod2[6])),
+        mod2_low = probs_draws_mod2_item3 %>% map_dbl(quantile, probs = 0.025),
+        mod2_high = probs_draws_mod2_item3 %>% map_dbl(quantile, probs = 0.975)
+    ) %>% 
+    gather(var, val, -quads)  %>% 
+    ggplot(
+        aes(x = quads, y = val, color = var, linetype = str_detect(var, "mod"))
+    ) +
+    geom_line() +
+    facet_wrap(~ str_detect(var, "2"), ncol = 1)
+```
+
+from pars and theta to vector of probs
+
+```{r}
+mod1_pars_theta_to_prob <- function(p, theta){
+    x <- c(1 / (1 + exp(-p[1] * theta - p[2])),
+      1 / (1 + exp(-p[1] * theta - p[3])),
+      1 / (1 + exp(-p[1] * theta - p[4])),
+      1 / (1 + exp(-p[1] * theta - p[5])),
+      1 / (1 + exp(-p[1] * theta - p[6])))
+    names(x) <- NULL
+    x
+}
+
+mod2_pars_theta_to_prob <- function(p, theta){
+    x <- c(1 / (1 + exp(-p[1] * theta - p[2])),
+      1 / (1 + exp(-p[3] * theta - p[4])),
+      1 / (1 + exp(-p[5] * theta - p[6])),
+      1 / (1 + exp(-p[7] * theta - p[8])),
+      1 / (1 + exp(-p[9] * theta - p[10])))
+    names(x) <- NULL
+    x
+}
+
+mod1_pars_theta_to_prob(pars_true_mod1, theta = 0)
+
+mod1_pars_theta_to_prob(pars_draws_mod1[1 , ], theta = 0)
+
+mod2_pars_theta_to_prob(pars_true_mod2, theta = 0)
+
+mod2_pars_theta_to_prob(pars_draws_mod2[1 , ], theta = 0)
+```
+
+optimization functions
+
+```{r}
+f1a <- function(eta, pars, targetp){
+    p <- mod1_pars_theta_to_prob(pars, eta)
+    sqrt(mean((p - targetp)^2))
+}
+
+f2a <- function(eta, pars, targetp){
+    p <- mod2_pars_theta_to_prob(pars, eta)
+    sqrt(mean((p - targetp)^2))
+}
+
+res_1a <- lapply(quads, function(t){
+    targetp <- mod1_pars_theta_to_prob(p = pars_true_mod1, theta = t)
+    apply(pars_draws_mod1, 1, function(pars){
+        optimize(f = f1a, interval = c(-6, 6), pars = pars, targetp = targetp)
+    })
+})
+
+res_2a <- lapply(quads, function(t){
+    targetp <- mod2_pars_theta_to_prob(p = pars_true_mod2, theta = t)
+    apply(pars_draws_mod2, 1, function(pars){
+        optimize(f = f2a, interval = c(-6, 6), pars = pars, targetp = targetp)
+    })
+})
+```
+
+for each draw what we have is the value of theta such that we get lowest rmse with that actual model probability vector
+
+```{r}
+rmse <- function(x, y){sqrt(mean((x - y)^2))}
+
+out <- 
+    tibble(quads) %>% 
+    mutate(
+        df_mod1 = res_1a %>% map(bind_rows),
+        df_mod2 = res_2a %>% map(bind_rows)
+    )
+
+# 1st inner row is for the first draw, which value of theta will 
+# have a small rmse between prob vector under the draw and prob vector under the model
+out$df_mod1[[1]]
+prob_vector_model <- mod1_pars_theta_to_prob(pars_true_mod1, -4)
+prob_vector_draw <- mod1_pars_theta_to_prob(pars_draws_mod1[1 , ], -3.79)
+rmse(prob_vector_model, prob_vector_draw)
+```
+
+a metric is in what percent of draws do we get the order of the estimated theta perfectly correct
+
+```{r}
+out2 <- 
+    out %>% 
+    unnest() %>% 
+    rename(
+        min_mod1 = minimum, 
+        obj_mod1 = objective,
+        min_mod2 = minimum1, 
+        obj_mod2 = objective1,
+    ) %>% 
+    group_by(quads) %>% 
+    mutate(draw = row_number()) %>% 
+    ungroup()
+
+results <- 
+    tibble(
+        draw = 1:n_draws,
+        mod1_spearman =
+            out2 %>% split(.$draw) %>% map_dbl(~ cor(.$min_mod1, quads, method = "spearman")),
+        mod2_spearman =
+            out2 %>% split(.$draw) %>% map_dbl(~ cor(.$min_mod2, quads, method = "spearman"))
+    )
+
+results %>% select(-draw) %>% map_dbl(~ mean(. == 1))
+```
+
+graphing model 2
+
+```{r}
+LSATdat <- tibble("theta" = quads, 
+                  "i1m" = 1 / (1 + exp(-pars_true_mod2[1] * quads - pars_true_mod2[2])),
+                  "i2m" = 1 / (1 + exp(-pars_true_mod2[3] * quads - pars_true_mod2[4])),
+                  "i3m" = 1 / (1 + exp(-pars_true_mod2[5] * quads - pars_true_mod2[6])),
+                  "i4m" = 1 / (1 + exp(-pars_true_mod2[7] * quads - pars_true_mod2[8])),
+                  "i5m" = 1 / (1 + exp(-pars_true_mod2[9] * quads - pars_true_mod2[10])),
+                  "i1l" = apply(probs_draws_mod2_item1, 2, quantile, probs = .025),
+                  "i2l" = apply(probs_draws_mod2_item2, 2, quantile, probs = .025),
+                  "i3l" = apply(probs_draws_mod2_item3, 2, quantile, probs = .025),
+                  "i4l" = apply(probs_draws_mod2_item4, 2, quantile, probs = .025),
+                  "i5l" = apply(probs_draws_mod2_item5, 2, quantile, probs = .025),
+                  "i1u" = apply(probs_draws_mod2_item1, 2, quantile, probs = .975),
+                  "i2u" = apply(probs_draws_mod2_item2, 2, quantile, probs = .975),
+                  "i3u" = apply(probs_draws_mod2_item3, 2, quantile, probs = .975),
+                  "i4u" = apply(probs_draws_mod2_item4, 2, quantile, probs = .975),
+                  "i5u" = apply(probs_draws_mod2_item5, 2, quantile, probs = .975))
+
+LSATdat %>% 
+    gather(type, p, -theta) %>% 
+    mutate(
+        item = paste("Item", substr(type, start = 2, stop = 2)),
+        bound = substr(type, start = 3, stop = 3)
+    ) %>% 
+    ggplot(aes(theta, p, col = item, linetype = bound)) + 
+    geom_path() + 
+    facet_wrap(~item) + 
+    scale_linetype_manual(values=c("dashed", "solid", "dashed")) + 
+    theme_light() + 
+    labs(x = expression(theta), y = "Probability", title = "Model 2")
+```
+
+for each draw, see how low we can get rmse to get to with theta = -4, then take the median of how low it can go. 
+
+intuitively, if every draw was the same (there was no instability), then we could always use theta = -4 and get 0. but the more instability the more sort of tradeoffs we face.
+
+```{r}
+LSATdat2 <- 
+    tibble(
+        "theta" = quads,
+        "M1.50" =  
+            out2 %>% group_by(quads) %>% 
+            summarize(o = quantile(obj_mod1, 0.5)) %>% pull(o),
+        "M1.95" = 
+            out2 %>% group_by(quads) %>% 
+            summarize(o = quantile(obj_mod1, 0.95)) %>% pull(o),
+       "M2.50" = 
+           out2 %>% group_by(quads) %>% 
+           summarize(o = quantile(obj_mod2, 0.5)) %>% pull(o),
+       "M2.95" = 
+           out2 %>% group_by(quads) %>% 
+           summarize(o = quantile(obj_mod2, 0.95)) %>% pull(o),
+    )
+
+LSATdat2 %>% 
+    gather(type, RMSD, -theta) %>% 
+    mutate(
+        model = 
+               paste0(
+                   substr(type, start = 2, stop = 2), "PM"),
+                    quantile = substr(type, start = 3, stop = 5),
+        light = (quantile == ".50" & RMSD > .02) | (quantile == ".95" & RMSD > .05)
+    ) %>% 
+    ggplot(aes(theta, RMSD, col = model, linetype = quantile, size = I(1))) + 
+    geom_path(na.rm=TRUE) +
+    theme_minimal() + 
+    geom_hline(yintercept = c(.02, .05), col = I("gray"), linetype = "dotted") + 
+    theme(legend.position = "bottom") + 
+    lims(y = c(0, .15)) + 
+    labs(x = expression(theta), y = expression(Delta)) + 
+    guides(
+        linetype = guide_legend(override.aes = list(color = "black", fill = "white"))
+    ) +
+    scale_color_grey()
+```
+
+graph test information
+
+```{r}
+LSATdat3 <- t(sapply(quads, function(t){
+    a <- pars_true_mod1[1]
+    b <- -pars_true_mod1[-1] / a
+    info1 <- sum(catR::Ii(t, it = cbind(a, b, 0, 1))$Ii)
+    a <- pars_true_mod2[c(1, 3, 5, 7, 9)]
+    b <- -pars_true_mod2[c(2, 4, 6, 8, 10)] / a
+    info2 <- sum(catR::Ii(t, cbind(a, b, 0, 1))$Ii)
+    c(info1, info2)
+}))
+
+tibble(theta = quads, "1PM" = LSATdat3[, 1], "2PM" = LSATdat3[, 2]) %>% 
+    gather(model, info, -theta) %>% 
+    ggplot(aes(theta, info, col = model, size = I(1))) + geom_path() +
+    scale_color_grey() + 
+    theme_minimal() + 
+    labs(x = expression(theta), y = "information") + theme(legend.position = "bottom")
+
+# something was wrong so here's my double check
+testinfo(mod1, 0)
+
+tibble(
+    theta = quads,
+    mod1_info = quads %>% map_dbl(~ testinfo(mod1, .)),
+    mod2_info = quads %>% map_dbl(~ testinfo(mod2, .)),
+) %>% 
+    gather(model, info, -theta) %>% 
+    ggplot(aes(x = theta, y = info, color = model)) +
+    geom_line()
+```

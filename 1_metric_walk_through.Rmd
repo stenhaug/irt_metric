@@ -1,0 +1,72 @@
+---
+title: "leah_rewrite_again"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+library(MASS)
+library(tidyverse)
+library(mirt)
+source("leah/my_leah_code_rewrite_functions.R")
+
+data <- 
+    expand.table(LSAT7)[ , 1:3] %>% 
+    as_tibble() %>% 
+    set_names(c("item_1", "item_2", "item_3"))
+
+data <- expand.table(LSAT7)
+```
+
+```{r}
+model <- mirt(data, 1, "2PL", SE = TRUE)
+
+quads <- seq(-4, 4, by = 0.25)
+
+draws_quads_and_prob <- 
+    crossing(get_draws(model, 1000), quads) %>% 
+    mutate(prob = pmap_dbl(list(disc, easy, quads), twopl))
+```
+
+graph confidence envelopes
+
+```{r}
+confidence_envelopes <- 
+    draws_quads_and_prob %>% 
+    group_by(item, quads) %>% 
+    summarize(
+        p_low = quantile(prob, probs = 0.025),
+        p = median(prob),
+        p_high = quantile(prob, probs = 0.975)
+    )
+
+confidence_envelopes %>% 
+    ungroup() %>% 
+    gather(env, probability, p_low:p_high) %>% 
+    ggplot(aes(x = quads, y = probability, color = env)) +
+    geom_line() +
+    facet_wrap(~ item)
+```
+
+optimize: for each draw what we have is the value of theta such that we get lowest rmse with that actual model probability vector
+
+```{r}
+# optimize
+closest_thetas <- 
+    draws_quads_and_prob %>% 
+    group_by(draw, quads) %>% 
+    summarize(observed_probs = list(prob)) %>% 
+    ungroup() %>%
+    mutate(optim = observed_probs %>% map(get_best_theta, model)) %>% 
+    unnest_wider(optim)
+
+# graph
+closest_thetas %>% 
+    group_by(quads) %>% 
+    summarize(
+        metric50 = quantile(objective, 0.5),
+        metric95 = quantile(objective, 0.95)
+    ) %>% 
+    gather(var, val, -quads) %>% 
+    ggplot(aes(x = quads, y = val, color = var)) +
+    geom_line()
+```
